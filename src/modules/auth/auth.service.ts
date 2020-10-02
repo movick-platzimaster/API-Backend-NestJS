@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   InternalServerErrorException,
@@ -63,13 +64,7 @@ export class AuthService {
     const isMatch = await compare(password, user.password);
     console.log('Debo de autenticar?', isMatch);
     if (!isMatch) throw new UnauthorizedException('invalid_credentials');
-    const payload: IJwtPayload = {
-      name: user.name,
-      email: user.email,
-      confirmed: user.confirmed,
-      suspended: user.suspended,
-    };
-    const token = await this._jwtService.sign(payload);
+    const token = await this.generateJwt(user)
     return plainToClass(SigninResponseDto, {
       accessToken: token,
       name: user.name,
@@ -122,9 +117,14 @@ export class AuthService {
 
   async confirm(pin: PinConfirmationDto): Promise<AuthConfirmedDto> {
     const user = await this.userModel.findOne({ email: pin.email });
+    if (!user) {
+      throw new BadRequestException('invalid_user')
+    }
 
     if (user.confirmed) {
+      const token = await this.generateJwt(user)
       return plainToClass(AuthConfirmedDto, {
+        token,
         email: pin.email,
         confirmed: true,
       });
@@ -136,12 +136,24 @@ export class AuthService {
       user.expirationDate = null;
       user.pin = null;
       await user.save();
+      const token = await this.generateJwt(user)
       return plainToClass(AuthConfirmedDto, {
+        token,
         email: pin.email,
         confirmed: true,
       });
     }
     throw new ConflictException('pin_not_match');
+  }
+
+  async generateJwt(user: User): Promise<string> {
+    const payload: IJwtPayload = {
+      name: user.name,
+      email: user.email,
+      confirmed: user.confirmed,
+      suspended: user.suspended,
+    };
+    return this._jwtService.sign(payload);
   }
 
   async resendPin(email: AuthResendCodeDto): Promise<boolean> {
